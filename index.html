@@ -232,21 +232,6 @@
   .alert-telegram-status.ok { color: var(--good); }
   .alert-telegram-status.err { color: var(--critical); }
 
-  .alert-panel-body { overflow-y: auto; padding: 4px 16px 16px; }
-  .alert-row {
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .alert-row:last-child { border-bottom: none; }
-  .alert-row-title {
-    font-size: 13px;
-    font-weight: 700;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-  }
-  .alert-row-title .sym-name { font-size: 10.5px; font-weight: 400; color: var(--text-muted); }
   .alert-fields { display: flex; gap: 8px; }
   .alert-field { flex: 1; }
   .alert-field label { display: block; font-size: 10.5px; color: var(--text-muted); margin-bottom: 3px; }
@@ -262,6 +247,51 @@
     border-radius: 8px;
   }
   .alert-input::placeholder { color: var(--text-muted); }
+
+  /* Per-symbol alert dialog: upper/lower rows each with -/+ steppers and a reset */
+  .symbol-alert-body { overflow-y: auto; padding: 4px 16px 4px; }
+  .alert-row-single { padding: 10px 0 12px; }
+  .alert-row-single label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    font-size: 12.5px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .alert-row-hint { font-size: 10px; font-weight: 400; color: var(--text-muted); }
+  .alert-stepper { display: flex; align-items: center; gap: 6px; }
+  .alert-stepper .alert-input { flex: 1; min-width: 0; text-align: center; font-size: 14px; }
+  .alert-step-btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-1);
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .alert-step-btn:active { transform: scale(0.92); }
+  .alert-reset-btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    height: 34px;
+    padding: 0 9px;
+    border-radius: 8px;
+    font-size: 10.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .alert-reset-btn:active { background: var(--surface-2); }
   .alert-panel-note {
     font-size: 10.5px;
     color: var(--text-muted);
@@ -369,6 +399,39 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+  .card-top-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .card-alert-btn {
+    position: relative;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    width: 20px; height: 20px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .card-alert-btn svg { width: 14px; height: 14px; }
+  .card-alert-btn:active { transform: scale(0.9); }
+  .card-alert-btn.active { color: var(--accent); }
+  .card-alert-badge {
+    display: none;
+    position: absolute;
+    top: -2px; right: -2px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid var(--surface);
+  }
+  .card-alert-badge.show { display: block; }
   .quotes {
     display: flex;
     flex-direction: column;
@@ -446,7 +509,7 @@
 
   <div class="controls">
     <span class="controls-label">板情報（気配値）を即時反映／切断時は1秒間隔で自動取得</span>
-    <button class="refresh-btn alert-btn" id="alertBtn" title="価格アラート設定" aria-label="価格アラート設定">
+    <button class="refresh-btn alert-btn" id="alertBtn" title="通知の全体設定（許可・Telegram）" aria-label="通知の全体設定（許可・Telegram）">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
         <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
@@ -469,7 +532,7 @@
   <div class="alert-overlay" id="alertOverlay">
     <div class="alert-panel">
       <div class="alert-panel-head">
-        <h2>価格アラート設定</h2>
+        <h2>通知の全体設定</h2>
         <button class="alert-panel-close" id="alertPanelClose" aria-label="閉じる">×</button>
       </div>
       <div class="alert-perm">
@@ -496,10 +559,41 @@
           <span class="alert-telegram-status" id="telegramStatus"></span>
         </div>
       </div>
-      <div class="alert-panel-body" id="alertPanelBody"></div>
       <div class="alert-panel-note">
-        上限・下限のどちらか（または両方）を入力すると、その価格を上回った／下回った瞬間に通知します。空欄はそのアラートを無効にします。判定には売値・買値の中間価格を使用します。<br>
+        各通貨の価格しきい値は、それぞれのカード右上のベルアイコンから設定できます。ここでは通知の許可設定とTelegram連携のみ行います。<br>
         このツールを開いている（バックグラウンドでも可）間のみ動作します。完全にアプリを閉じている間の通知には対応していません。ブラウザによっては通知が利用できない場合があります。
+      </div>
+    </div>
+  </div>
+
+  <div class="alert-overlay" id="symbolAlertOverlay">
+    <div class="alert-panel">
+      <div class="alert-panel-head">
+        <h2 id="symbolAlertTitle">価格アラート設定</h2>
+        <button class="alert-panel-close" id="symbolAlertClose" aria-label="閉じる">×</button>
+      </div>
+      <div class="symbol-alert-body" id="symbolAlertBody">
+        <div class="alert-row-single">
+          <label>上限（円）<span class="alert-row-hint">上回ったら通知</span></label>
+          <div class="alert-stepper">
+            <button class="alert-step-btn" id="alertUpperMinus" aria-label="上限を下げる">－</button>
+            <input type="number" inputmode="decimal" class="alert-input" id="alertUpperInput" placeholder="未設定">
+            <button class="alert-step-btn" id="alertUpperPlus" aria-label="上限を上げる">＋</button>
+            <button class="alert-reset-btn" id="alertUpperReset">リセット</button>
+          </div>
+        </div>
+        <div class="alert-row-single">
+          <label>下限（円）<span class="alert-row-hint">下回ったら通知</span></label>
+          <div class="alert-stepper">
+            <button class="alert-step-btn" id="alertLowerMinus" aria-label="下限を下げる">－</button>
+            <input type="number" inputmode="decimal" class="alert-input" id="alertLowerInput" placeholder="未設定">
+            <button class="alert-step-btn" id="alertLowerPlus" aria-label="下限を上げる">＋</button>
+            <button class="alert-reset-btn" id="alertLowerReset">リセット</button>
+          </div>
+        </div>
+      </div>
+      <div class="alert-panel-note">
+        開いた直後は、上限に現在の売値、下限に現在の買値が自動入力されます（設定済みの場合は保存済みの値を表示）。どちらか（または両方）を空欄にすると、そのアラートは無効になります。判定には売値・買値の中間価格を使用します。
       </div>
     </div>
   </div>
@@ -565,10 +659,33 @@
   var alertBadge = document.getElementById("alertBadge");
   var alertOverlay = document.getElementById("alertOverlay");
   var alertPanelClose = document.getElementById("alertPanelClose");
-  var alertPanelBody = document.getElementById("alertPanelBody");
   var alertPermText = document.getElementById("alertPermText");
   var alertPermBtn = document.getElementById("alertPermBtn");
   var alertToastWrap = document.getElementById("alertToastWrap");
+
+  var symbolAlertOverlay = document.getElementById("symbolAlertOverlay");
+  var symbolAlertClose = document.getElementById("symbolAlertClose");
+  var symbolAlertTitle = document.getElementById("symbolAlertTitle");
+  var alertUpperInput = document.getElementById("alertUpperInput");
+  var alertLowerInput = document.getElementById("alertLowerInput");
+  var alertUpperMinus = document.getElementById("alertUpperMinus");
+  var alertUpperPlus = document.getElementById("alertUpperPlus");
+  var alertUpperReset = document.getElementById("alertUpperReset");
+  var alertLowerMinus = document.getElementById("alertLowerMinus");
+  var alertLowerPlus = document.getElementById("alertLowerPlus");
+  var alertLowerReset = document.getElementById("alertLowerReset");
+  var currentAlertSym = null;
+
+  // Per-symbol +/- step size for the alert dialog, and how many decimal places
+  // that step needs (derived from the step's own precision) so repeated
+  // stepping never accumulates floating-point noise like 0.30000000000000004.
+  var ALERT_STEP = { BTC: 1000, ETH: 100, XRP: 0.1, BCH: 50, LTC: 5, SOL: 5, LINK: 1, SUI: 0.1, DOT: 0.1 };
+  var ALERT_STEP_DECIMALS = {};
+  Object.keys(ALERT_STEP).forEach(function (sym) {
+    var s = String(ALERT_STEP[sym]);
+    var i = s.indexOf(".");
+    ALERT_STEP_DECIMALS[sym] = i === -1 ? 0 : (s.length - i - 1);
+  });
   var telegramBotTokenEl = document.getElementById("telegramBotToken");
   var telegramChatIdEl = document.getElementById("telegramChatId");
   var telegramTestBtn = document.getElementById("telegramTestBtn");
@@ -639,7 +756,16 @@
     card.innerHTML =
       '<div class="card-top">' +
         '<div class="card-title"><span class="sym">' + sym + '</span><span class="sym-name">' + NAMES[sym] + '</span></div>' +
-        '<div class="updated-at" id="ts-' + sym + '">--:--:--</div>' +
+        '<div class="card-top-right">' +
+          '<button class="card-alert-btn" id="alertBtn-' + sym + '" title="' + sym + 'の価格アラート設定" aria-label="' + sym + 'の価格アラート設定">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+              '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>' +
+              '<path d="M13.73 21a2 2 0 0 1-3.46 0"></path>' +
+            '</svg>' +
+            '<span class="card-alert-badge" id="alertBadge-' + sym + '"></span>' +
+          '</button>' +
+          '<div class="updated-at" id="ts-' + sym + '">--:--:--</div>' +
+        '</div>' +
       '</div>' +
       '<div class="quotes">' +
         '<div class="quote-row">' +
@@ -753,6 +879,22 @@
 
   function updateAlertBadge() {
     if (alertBadge) alertBadge.classList.toggle("show", hasAnyAlert());
+  }
+
+  function updateCardAlertBadge(sym) {
+    var setting = alertSettings[sym];
+    var active = !!(setting && (setting.upper != null || setting.lower != null));
+    var badge = document.getElementById("alertBadge-" + sym);
+    if (badge) badge.classList.toggle("show", active);
+    var btn = document.getElementById("alertBtn-" + sym);
+    if (btn) btn.classList.toggle("active", active);
+    updateAlertBadge();
+  }
+
+  function roundStepValue(value, sym) {
+    var d = ALERT_STEP_DECIMALS[sym] || 0;
+    var factor = Math.pow(10, d);
+    return Math.round(value * factor) / factor;
   }
 
   function checkPriceAlert(sym, bid, ask) {
@@ -936,7 +1078,7 @@
     setting[field] = (num == null || isNaN(num)) ? null : num;
     alertSettings[sym] = setting;
     saveAlertSettings();
-    updateAlertBadge();
+    updateCardAlertBadge(sym);
     // Re-arm using the price we already know right now, rather than waiting for
     // the next tick to "seed" — otherwise a price that's already crossing the new
     // threshold on the very next update would be silently swallowed as the seed
@@ -954,38 +1096,6 @@
     }
   }
 
-  function buildAlertPanel() {
-    if (!alertPanelBody) return;
-    var frag = document.createDocumentFragment();
-    SYMBOLS.forEach(function (sym) {
-      var setting = getAlertSetting(sym);
-      var row = document.createElement("div");
-      row.className = "alert-row";
-      row.innerHTML =
-        '<div class="alert-row-title">' + sym + '<span class="sym-name">' + NAMES[sym] + '</span></div>' +
-        '<div class="alert-fields">' +
-          '<div class="alert-field">' +
-            '<label>上限（円）</label>' +
-            '<input type="number" inputmode="decimal" class="alert-input" id="alertUpper-' + sym + '" placeholder="未設定" value="' + (setting.upper != null ? setting.upper : "") + '">' +
-          '</div>' +
-          '<div class="alert-field">' +
-            '<label>下限（円）</label>' +
-            '<input type="number" inputmode="decimal" class="alert-input" id="alertLower-' + sym + '" placeholder="未設定" value="' + (setting.lower != null ? setting.lower : "") + '">' +
-          '</div>' +
-        '</div>';
-      frag.appendChild(row);
-    });
-    alertPanelBody.innerHTML = "";
-    alertPanelBody.appendChild(frag);
-
-    SYMBOLS.forEach(function (sym) {
-      var upperEl = document.getElementById("alertUpper-" + sym);
-      var lowerEl = document.getElementById("alertLower-" + sym);
-      if (upperEl) upperEl.addEventListener("change", function () { alertInputChanged(sym, "upper", upperEl.value); });
-      if (lowerEl) lowerEl.addEventListener("change", function () { alertInputChanged(sym, "lower", lowerEl.value); });
-    });
-  }
-
   function openAlertPanel() {
     updateNotifyPermUI();
     if (alertOverlay) alertOverlay.classList.add("show");
@@ -993,6 +1103,77 @@
 
   function closeAlertPanel() {
     if (alertOverlay) alertOverlay.classList.remove("show");
+  }
+
+  // Per-symbol alert dialog: opened from each card's bell icon. Reuses one
+  // overlay/one set of inputs for whichever symbol is currently open, tracked
+  // via currentAlertSym, rather than building 9 separate dialogs up front.
+  function openSymbolAlertPanel(sym) {
+    currentAlertSym = sym;
+    if (symbolAlertTitle) symbolAlertTitle.textContent = sym + "（" + NAMES[sym] + "）価格アラート設定";
+
+    // If a bound isn't set yet, seed it from the current price (upper = current
+    // ask/売値, lower = current bid/買値) so the dialog opens with a usable
+    // starting point rather than a blank box — the user can then nudge it with
+    // +/- or clear it with リセット. An already-saved value is left untouched.
+    var setting = getAlertSetting(sym);
+    var known = lastKnownPrice[sym];
+    if (setting.upper == null && known) {
+      alertInputChanged(sym, "upper", roundStepValue(known.ask, sym));
+      setting = getAlertSetting(sym);
+    }
+    if (setting.lower == null && known) {
+      alertInputChanged(sym, "lower", roundStepValue(known.bid, sym));
+      setting = getAlertSetting(sym);
+    }
+
+    var step = ALERT_STEP[sym] || 1;
+    if (alertUpperInput) {
+      alertUpperInput.value = setting.upper != null ? setting.upper : "";
+      alertUpperInput.step = step;
+    }
+    if (alertLowerInput) {
+      alertLowerInput.value = setting.lower != null ? setting.lower : "";
+      alertLowerInput.step = step;
+    }
+
+    if (symbolAlertOverlay) symbolAlertOverlay.classList.add("show");
+  }
+
+  function closeSymbolAlertPanel() {
+    if (symbolAlertOverlay) symbolAlertOverlay.classList.remove("show");
+    currentAlertSym = null;
+  }
+
+  function stepAlertInput(field, dir) {
+    if (!currentAlertSym) return;
+    var sym = currentAlertSym;
+    var input = field === "upper" ? alertUpperInput : alertLowerInput;
+    if (!input) return;
+    var step = ALERT_STEP[sym] || 1;
+
+    var base = null;
+    if (input.value !== "") {
+      var parsed = parseFloat(input.value);
+      if (!isNaN(parsed)) base = parsed;
+    }
+    if (base == null) {
+      var known = lastKnownPrice[sym];
+      base = known ? (field === "upper" ? known.ask : known.bid) : 0;
+    }
+
+    var next = roundStepValue(base + step * dir, sym);
+    if (next < 0) next = 0;
+    input.value = next;
+    alertInputChanged(sym, field, next);
+  }
+
+  function resetAlertField(field) {
+    if (!currentAlertSym) return;
+    var sym = currentAlertSym;
+    var input = field === "upper" ? alertUpperInput : alertLowerInput;
+    if (input) input.value = "";
+    alertInputChanged(sym, field, "");
   }
 
   // Best price = min ask / max bid across whatever levels the API returns —
@@ -1581,6 +1762,27 @@
   });
   if (alertPermBtn) alertPermBtn.addEventListener("click", requestNotifyPermission);
 
+  SYMBOLS.forEach(function (sym) {
+    var btn = document.getElementById("alertBtn-" + sym);
+    if (btn) btn.addEventListener("click", function () { openSymbolAlertPanel(sym); });
+  });
+  if (symbolAlertClose) symbolAlertClose.addEventListener("click", closeSymbolAlertPanel);
+  if (symbolAlertOverlay) symbolAlertOverlay.addEventListener("click", function (ev) {
+    if (ev.target === symbolAlertOverlay) closeSymbolAlertPanel();
+  });
+  if (alertUpperInput) alertUpperInput.addEventListener("change", function () {
+    if (currentAlertSym) alertInputChanged(currentAlertSym, "upper", alertUpperInput.value);
+  });
+  if (alertLowerInput) alertLowerInput.addEventListener("change", function () {
+    if (currentAlertSym) alertInputChanged(currentAlertSym, "lower", alertLowerInput.value);
+  });
+  if (alertUpperMinus) alertUpperMinus.addEventListener("click", function () { stepAlertInput("upper", -1); });
+  if (alertUpperPlus) alertUpperPlus.addEventListener("click", function () { stepAlertInput("upper", 1); });
+  if (alertLowerMinus) alertLowerMinus.addEventListener("click", function () { stepAlertInput("lower", -1); });
+  if (alertLowerPlus) alertLowerPlus.addEventListener("click", function () { stepAlertInput("lower", 1); });
+  if (alertUpperReset) alertUpperReset.addEventListener("click", function () { resetAlertField("upper"); });
+  if (alertLowerReset) alertLowerReset.addEventListener("click", function () { resetAlertField("lower"); });
+
   if (telegramBotTokenEl) telegramBotTokenEl.addEventListener("change", function () {
     telegramSettings.botToken = telegramBotTokenEl.value.trim();
     saveTelegramSettings();
@@ -1631,8 +1833,7 @@
   });
 
   alertSettings = loadAlertSettings();
-  buildAlertPanel();
-  updateAlertBadge();
+  SYMBOLS.forEach(function (sym) { updateCardAlertBadge(sym); });
   updateNotifyPermUI();
 
   telegramSettings = loadTelegramSettings();
