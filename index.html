@@ -232,6 +232,44 @@
   .alert-telegram-status.ok { color: var(--good); }
   .alert-telegram-status.err { color: var(--critical); }
 
+  /* Toggle switches (GAS master on/off, per-device heartbeat opt-in) */
+  .switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .switch-row-label { font-size: 12px; color: var(--text-1); line-height: 1.5; }
+  .switch-row-sublabel { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 42px; height: 24px;
+    flex-shrink: 0;
+  }
+  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch-track {
+    position: absolute;
+    inset: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    pointer-events: none; /* let taps/clicks reach the real checkbox underneath directly */
+  }
+  .switch-track::before {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .switch input:checked + .switch-track { background: var(--accent); border-color: var(--accent); }
+  .switch input:checked + .switch-track::before { transform: translateX(18px); background: #fff; }
+
   .alert-fields { display: flex; gap: 8px; }
   .alert-field { flex: 1; }
   .alert-field label { display: block; font-size: 10.5px; color: var(--text-muted); margin-bottom: 3px; }
@@ -559,9 +597,51 @@
           <span class="alert-telegram-status" id="telegramStatus"></span>
         </div>
       </div>
+      <div class="alert-telegram">
+        <div class="alert-telegram-head">GAS連携（任意・スリープ中も通知したい場合）</div>
+        <div class="alert-telegram-hint">
+          Google Apps ScriptをWebアプリとして公開したURLを入力すると、各通貨のしきい値を変更するたびにそちらへ自動で送信されます。GAS側が独立して価格をチェックしてTelegramへ送るため、このツールを開いていなくても、スマホがスリープしていても通知が届きます。合言葉（SYNC_SECRET）はGASスクリプト側で設定した場合のみ入力してください。
+        </div>
+        <div class="alert-telegram-fields">
+          <div class="alert-field">
+            <label>WebアプリのURL</label>
+            <input type="text" class="alert-input" id="gasWebAppUrl" placeholder="https://script.google.com/macros/s/.../exec">
+          </div>
+          <div class="alert-field">
+            <label>合言葉（任意）</label>
+            <input type="text" class="alert-input" id="gasSyncSecret" placeholder="GAS側のSYNC_SECRETと同じ値">
+          </div>
+        </div>
+        <div class="alert-telegram-actions">
+          <button class="alert-perm-btn" id="gasSyncTestBtn">今すぐ送信</button>
+          <span class="alert-telegram-status" id="gasSyncStatus"></span>
+        </div>
+
+        <div class="switch-row" style="margin-top:12px;">
+          <div>
+            <div class="switch-row-label">GASによる自動通知</div>
+            <div class="switch-row-sublabel">OFFにすると、どの端末の状態に関わらずGAS側の通知を完全に停止します（例: 寝る前に通知が来てほしくない場合など）。この端末から最後に送った状態が反映されます。</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="gasEnabledSwitch" checked>
+            <span class="switch-track"></span>
+          </label>
+        </div>
+
+        <div class="switch-row">
+          <div>
+            <div class="switch-row-label">この端末をスリープ検知に使う</div>
+            <div class="switch-row-sublabel">この端末が開かれている間、GAS側の自動チェックを休止させます。常時起動しているPCなど「開きっぱなしでも問題ない端末」ではOFFにしてください。ONのままだと、その端末が開いている限りGAS側が休止し続け、スマホをスリープさせても通知が届かなくなります。</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="gasHeartbeatEnabledSwitch" checked>
+            <span class="switch-track"></span>
+          </label>
+        </div>
+      </div>
       <div class="alert-panel-note">
-        各通貨の価格しきい値は、それぞれのカード右上のベルアイコンから設定できます。ここでは通知の許可設定とTelegram連携のみ行います。<br>
-        このツールを開いている（バックグラウンドでも可）間のみ動作します。完全にアプリを閉じている間の通知には対応していません。ブラウザによっては通知が利用できない場合があります。
+        各通貨の価格しきい値は、それぞれのカード右上のベルアイコンから設定できます。ここでは通知の許可設定・Telegram連携・GAS連携のみ行います。<br>
+        GAS連携を設定していない場合、通知はこのツールを開いている（バックグラウンドでも可）間のみ動作します。スマホのスリープ中も通知したい場合は、上のGAS連携の設定が必要です。
       </div>
     </div>
   </div>
@@ -690,6 +770,13 @@
   var telegramChatIdEl = document.getElementById("telegramChatId");
   var telegramTestBtn = document.getElementById("telegramTestBtn");
   var telegramStatusEl = document.getElementById("telegramStatus");
+
+  var gasWebAppUrlEl = document.getElementById("gasWebAppUrl");
+  var gasSyncSecretEl = document.getElementById("gasSyncSecret");
+  var gasSyncTestBtn = document.getElementById("gasSyncTestBtn");
+  var gasSyncStatusEl = document.getElementById("gasSyncStatus");
+  var gasEnabledSwitchEl = document.getElementById("gasEnabledSwitch");
+  var gasHeartbeatEnabledSwitchEl = document.getElementById("gasHeartbeatEnabledSwitch");
 
   var INTERVAL_SEC = 1;  // REST fallback polling cadence (fixed per user request)
   var restTimer = null;
@@ -999,6 +1086,114 @@
     telegramStatusEl.className = "alert-telegram-status" + (cls ? " " + cls : "");
   }
 
+  // ---- Google Apps Script sync (optional) ----
+  // When configured, every threshold change made in this browser is also POSTed
+  // to a GAS Web App deployment, which persists it server-side and uses it for
+  // its own independent 1-minute price check — so alerts keep firing (via
+  // Telegram) even while this phone is asleep or the tab is closed. Best-effort
+  // only: failures are swallowed since this is a convenience sync, not required
+  // for the tool's core in-page functionality.
+  //
+  // Uses mode:"no-cors" with a text/plain body (rather than application/json)
+  // because Apps Script Web Apps commonly don't return CORS headers this page
+  // could read anyway — no-cors lets the POST actually reach the server without
+  // the browser blocking it, at the cost of not being able to read the response.
+  var GAS_STORAGE_KEY = "priceChecker.gasSync.v1";
+  // heartbeatEnabled: whether THIS device sends heartbeat pings at all (per-device,
+  // local only — turn this off on always-on machines like a PC that runs other bots
+  // 24/7, so its mere presence doesn't permanently keep GAS paused).
+  // gasEnabled: the master on/off switch for GAS-side checking, pushed to GAS on
+  // every change. This is a *shared* setting (GAS only keeps one copy), so whichever
+  // device last changed it wins — this device's switch just shows what it last sent,
+  // not necessarily GAS's true current state if another device changed it since.
+  var gasSyncSettings = { webAppUrl: "", secret: "", heartbeatEnabled: true, gasEnabled: true };
+
+  function loadGasSyncSettings() {
+    try {
+      var raw = window.localStorage.getItem(GAS_STORAGE_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      return {
+        webAppUrl: (parsed && typeof parsed.webAppUrl === "string") ? parsed.webAppUrl : "",
+        secret: (parsed && typeof parsed.secret === "string") ? parsed.secret : "",
+        heartbeatEnabled: (parsed && typeof parsed.heartbeatEnabled === "boolean") ? parsed.heartbeatEnabled : true,
+        gasEnabled: (parsed && typeof parsed.gasEnabled === "boolean") ? parsed.gasEnabled : true
+      };
+    } catch (e) {
+      return { webAppUrl: "", secret: "", heartbeatEnabled: true, gasEnabled: true };
+    }
+  }
+
+  function saveGasSyncSettings() {
+    try { window.localStorage.setItem(GAS_STORAGE_KEY, JSON.stringify(gasSyncSettings)); }
+    catch (e) { /* storage unavailable — GAS sync settings just won't persist */ }
+  }
+
+  function syncAlertSettingsToGas() {
+    var url = (gasSyncSettings.webAppUrl || "").trim();
+    if (!url) return;
+    try {
+      fetch(url, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ secret: gasSyncSettings.secret || "", settings: alertSettings })
+      }).catch(function () { /* best-effort; ignore network errors */ });
+    } catch (e) { /* best-effort; ignore */ }
+  }
+
+  // Pushes the master GAS on/off switch state. Sent as its own lightweight POST
+  // (separate from the settings sync) whenever the switch changes, and once on load
+  // so a freshly-opened device asserts whatever this device's switch is set to.
+  function syncGasEnabledToGas() {
+    var url = (gasSyncSettings.webAppUrl || "").trim();
+    if (!url) return;
+    try {
+      fetch(url, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ secret: gasSyncSettings.secret || "", gasEnabled: !!gasSyncSettings.gasEnabled })
+      }).catch(function () { /* best-effort; ignore network errors */ });
+    } catch (e) { /* best-effort; ignore */ }
+  }
+
+  // ---- GAS heartbeat ----
+  // While this page is open and actually running, it pings the GAS Web App every
+  // ~20s. GAS treats a recent ping as "the browser is handling alerts itself right
+  // now" and skips its own price check — saving API calls and avoiding duplicate
+  // Telegram notifications from both sides firing on the same crossing. The moment
+  // the phone sleeps or the tab is closed, this interval simply stops running (the
+  // browser suspends JS timers), pings stop arriving, and GAS resumes on its own
+  // after its 90-second staleness window — no explicit "going to sleep" signal
+  // needed from this side.
+  //
+  // heartbeatEnabled gates this per-device: on a machine left open 24/7 (e.g. a PC
+  // already running other bots), leaving this on would keep GAS permanently paused
+  // even while every phone is asleep, defeating the point — so it's opt-out per
+  // device rather than tied to page visibility alone.
+  var GAS_HEARTBEAT_INTERVAL_MS = 20000;
+  var gasHeartbeatTimer = null;
+
+  function sendGasHeartbeat() {
+    if (!gasSyncSettings.heartbeatEnabled) return;
+    var url = (gasSyncSettings.webAppUrl || "").trim();
+    if (!url) return;
+    try {
+      fetch(url, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ secret: gasSyncSettings.secret || "", heartbeat: true })
+      }).catch(function () { /* best-effort; ignore network errors */ });
+    } catch (e) { /* best-effort; ignore */ }
+  }
+
+  function startGasHeartbeat() {
+    if (gasHeartbeatTimer) return;
+    sendGasHeartbeat();
+    gasHeartbeatTimer = setInterval(sendGasHeartbeat, GAS_HEARTBEAT_INTERVAL_MS);
+  }
+
   function showToast(message) {
     if (!alertToastWrap) return;
     var el = document.createElement("div");
@@ -1079,6 +1274,7 @@
     alertSettings[sym] = setting;
     saveAlertSettings();
     updateCardAlertBadge(sym);
+    syncAlertSettingsToGas();
     // Re-arm using the price we already know right now, rather than waiting for
     // the next tick to "seed" — otherwise a price that's already crossing the new
     // threshold on the very next update would be silently swallowed as the seed
@@ -1809,6 +2005,39 @@
     });
   });
 
+  if (gasWebAppUrlEl) gasWebAppUrlEl.addEventListener("change", function () {
+    gasSyncSettings.webAppUrl = gasWebAppUrlEl.value.trim();
+    saveGasSyncSettings();
+    if (gasSyncStatusEl) { gasSyncStatusEl.textContent = ""; gasSyncStatusEl.className = "alert-telegram-status"; }
+  });
+  if (gasSyncSecretEl) gasSyncSecretEl.addEventListener("change", function () {
+    gasSyncSettings.secret = gasSyncSecretEl.value.trim();
+    saveGasSyncSettings();
+    if (gasSyncStatusEl) { gasSyncStatusEl.textContent = ""; gasSyncStatusEl.className = "alert-telegram-status"; }
+  });
+  if (gasSyncTestBtn) gasSyncTestBtn.addEventListener("click", function () {
+    if (!gasSyncSettings.webAppUrl) {
+      if (gasSyncStatusEl) { gasSyncStatusEl.textContent = "WebアプリのURLを入力してください"; gasSyncStatusEl.className = "alert-telegram-status err"; }
+      return;
+    }
+    syncAlertSettingsToGas();
+    // no-cors POSTs give no readable response, so this can't confirm success/failure —
+    // just confirm the request was sent and point to where to actually verify it.
+    if (gasSyncStatusEl) {
+      gasSyncStatusEl.textContent = "送信しました（成否はGAS側の「実行数」ログか、次回の価格チェックで確認してください）";
+      gasSyncStatusEl.className = "alert-telegram-status";
+    }
+  });
+  if (gasEnabledSwitchEl) gasEnabledSwitchEl.addEventListener("change", function () {
+    gasSyncSettings.gasEnabled = gasEnabledSwitchEl.checked;
+    saveGasSyncSettings();
+    syncGasEnabledToGas();
+  });
+  if (gasHeartbeatEnabledSwitchEl) gasHeartbeatEnabledSwitchEl.addEventListener("change", function () {
+    gasSyncSettings.heartbeatEnabled = gasHeartbeatEnabledSwitchEl.checked;
+    saveGasSyncSettings();
+  });
+
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) {
       stopRestFallback();
@@ -1829,6 +2058,9 @@
       startOkjPolling();
       // Same "never trust readyState after backgrounding" logic applies to OKJ's WS.
       reconnectOkjWsNow();
+      // Prompt heartbeat so GAS learns "the browser is back" quickly rather than
+      // waiting up to GAS_HEARTBEAT_INTERVAL_MS for the next scheduled ping.
+      sendGasHeartbeat();
     }
   });
 
@@ -1839,6 +2071,22 @@
   telegramSettings = loadTelegramSettings();
   if (telegramBotTokenEl) telegramBotTokenEl.value = telegramSettings.botToken;
   if (telegramChatIdEl) telegramChatIdEl.value = telegramSettings.chatId;
+
+  gasSyncSettings = loadGasSyncSettings();
+  if (gasWebAppUrlEl) gasWebAppUrlEl.value = gasSyncSettings.webAppUrl;
+  if (gasSyncSecretEl) gasSyncSecretEl.value = gasSyncSettings.secret;
+  if (gasEnabledSwitchEl) gasEnabledSwitchEl.checked = gasSyncSettings.gasEnabled;
+  if (gasHeartbeatEnabledSwitchEl) gasHeartbeatEnabledSwitchEl.checked = gasSyncSettings.heartbeatEnabled;
+  // Push whatever thresholds are already saved in this browser once on load, so a
+  // freshly-deployed GAS script (with no synced state yet) starts from what the
+  // user already configured here rather than staying empty until the next edit.
+  // Note: the master on/off switch is intentionally NOT auto-pushed here — with
+  // multiple devices sharing one GAS backend, silently re-asserting whatever this
+  // device last had locally (which could be stale) on every load could clobber a
+  // deliberate OFF sent from another device. It only pushes when the switch is
+  // actually clicked on this device.
+  syncAlertSettingsToGas();
+  startGasHeartbeat();
 
   // initial load: check maintenance first, then one-shot REST fetch for instant
   // first paint (a no-op if maintenance is active), then hand off to WebSocket.
