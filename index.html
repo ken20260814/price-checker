@@ -681,7 +681,7 @@
   <div class="alert-toast-wrap" id="alertToastWrap"></div>
 
   <footer>
-    データ提供元: 通常はGMOコイン 公開API（api.coin.z.com）板情報チャンネル。DOTはOKJの板情報を優先取得（不可時はbitbank）。GMOメンテナンス中（毎週土曜9:00〜11:10）は全銘柄bitbankに切替。<br>
+    データ提供元: 通常はGMOコイン 公開API（api.coin.z.com）板情報チャンネル。DOTはOKJの板情報を優先取得（不可時はbitbank）。AVAXはbitbankを優先取得（不可時はOKJ）。GMOメンテナンス中（毎週土曜9:00〜11:10）は全銘柄bitbankに切替。<br>
     買値・売値は板情報の最良気配（最良買い注文・最良売り注文）です。約定ベースではないため、流動性の低い銘柄でも気配の動きをリアルタイムに反映します。<br>
     表示価格は参考値です。実際の取引価格は必ずGMOコインアプリ・サイトでご確認ください。<br>
     <span id="lastFetchLine">未取得</span>
@@ -693,8 +693,8 @@
 (function () {
   "use strict";
 
-  // Order also drives the 2-column card grid: BTC/ETH, BCH/XRP, LTC/SOL, LINK/SUI, DOT alone.
-  var SYMBOLS = ["BTC", "ETH", "BCH", "XRP", "LTC", "SOL", "LINK", "SUI", "DOT"];
+  // Order also drives the 2-column card grid: BTC/ETH, BCH/XRP, LTC/SOL, LINK/SUI, DOT/AVAX.
+  var SYMBOLS = ["BTC", "ETH", "BCH", "XRP", "LTC", "SOL", "LINK", "SUI", "DOT", "AVAX"];
   var NAMES = {
     BTC:  "ビットコイン",
     ETH:  "イーサリアム",
@@ -704,7 +704,8 @@
     LINK: "チェーンリンク",
     SOL:  "ソラナ",
     SUI:  "スイ",
-    DOT:  "ポルカドット"
+    DOT:  "ポルカドット",
+    AVAX: "アバランチ"
   };
 
   // "ticker" only updates when a trade actually executes, so thinly-traded symbols
@@ -719,13 +720,15 @@
   ];
   var FETCH_TIMEOUT_MS = 5000;
 
-  // bitbank: used (a) as DOT's fallback whenever OKJ is unreachable, and
-  // (b) for every symbol during GMO's announced Saturday maintenance window.
+  // bitbank: used (a) as DOT's fallback whenever OKJ is unreachable, (b) as AVAX's
+  // primary source (OKJ is AVAX's fallback — see the AVAX poller below), and
+  // (c) for every symbol during GMO's announced Saturday maintenance window.
   var BITBANK_URL = "https://public.bitbank.cc";
   var BITBANK_PAIR = {
     BTC: "btc_jpy", ETH: "eth_jpy", XRP: "xrp_jpy",
     BCH: "bcc_jpy", // bitbank's legacy symbol for Bitcoin Cash
-    LTC: "ltc_jpy", LINK: "link_jpy", SOL: "sol_jpy", SUI: "sui_jpy", DOT: "dot_jpy"
+    LTC: "ltc_jpy", LINK: "link_jpy", SOL: "sol_jpy", SUI: "sui_jpy", DOT: "dot_jpy",
+    AVAX: "avax_jpy"
   };
 
   var listEl = document.getElementById("list");
@@ -759,7 +762,7 @@
   // Per-symbol +/- step size for the alert dialog, and how many decimal places
   // that step needs (derived from the step's own precision) so repeated
   // stepping never accumulates floating-point noise like 0.30000000000000004.
-  var ALERT_STEP = { BTC: 1000, ETH: 100, XRP: 0.1, BCH: 50, LTC: 5, SOL: 5, LINK: 1, SUI: 0.1, DOT: 0.1 };
+  var ALERT_STEP = { BTC: 1000, ETH: 100, XRP: 0.1, BCH: 50, LTC: 5, SOL: 5, LINK: 1, SUI: 0.1, DOT: 0.1, AVAX: 5 };
   var ALERT_STEP_DECIMALS = {};
   Object.keys(ALERT_STEP).forEach(function (sym) {
     var s = String(ALERT_STEP[sym]);
@@ -806,6 +809,12 @@
   var okjTimer = null;
   var okjInFlight = false;
 
+  // AVAX-JPY board on OKJ — used only as AVAX's fallback (bitbank is AVAX's primary
+  // source, see the AVAX poller further below). NOTE: same caveat as the DOT OKJ URL
+  // above — this instrument id follows OKJ's documented naming convention but could
+  // not be live-verified from this environment.
+  var OKJ_AVAX_BOOK_URL = "https://www.okcoin.jp/api/spot/v3/instruments/AVAX-JPY/book";
+
   // OKJ WebSocket (OKEx/OKCoin v3-style API): wss://connect.okcoin.jp, channel
   // "spot/depth5:DOT-JPY". This API pushes messages deflate-compressed (no zlib
   // header), so incoming binary frames need pako's inflateRaw to decode — pako is
@@ -828,7 +837,11 @@
   // GMO Coin's announced weekly maintenance: every Saturday 09:00–11:10 JST,
   // GMO's own API is unavailable, so every non-DOT card switches to bitbank
   // for the duration. Evaluated in Asia/Tokyo time regardless of device timezone.
-  var MAINTENANCE_SYMBOLS = SYMBOLS.filter(function (s) { return s !== "DOT"; });
+  // DOT and AVAX never come from GMO in the first place (see applyOrderbook below),
+  // so GMO's maintenance window doesn't affect them — they keep using their own
+  // OKJ/bitbank pollers unchanged, and shouldn't also be picked up by the
+  // maintenance bitbank poller (that would just be a second, redundant poller).
+  var MAINTENANCE_SYMBOLS = SYMBOLS.filter(function (s) { return s !== "DOT" && s !== "AVAX"; });
   var maintenanceActive = false;
   var maintenanceTimer = null;
 
@@ -864,7 +877,7 @@
           '<span class="quote-value skel" id="bid-' + sym + '">--</span>' +
         '</div>' +
       '</div>' +
-      '<div class="src-line" id="src-' + sym + '">' + (sym === "DOT" ? "データ取得中…" : "") + '</div>';
+      '<div class="src-line" id="src-' + sym + '">' + ((sym === "DOT" || sym === "AVAX") ? "データ取得中…" : "") + '</div>';
     listEl.appendChild(card);
   });
 
@@ -1395,11 +1408,12 @@
     return best;
   }
 
-  // DOT is handled entirely by its own OKJ→bitbank poller (see below), never by GMO.
-  // Every other symbol normally comes from GMO, except during GMO's Saturday
-  // maintenance window, when bitbank owns them too (see maintenance poller below).
+  // DOT is handled entirely by its own OKJ→bitbank poller (see below), and AVAX by
+  // its own bitbank→OKJ poller — neither ever comes from GMO. Every other symbol
+  // normally comes from GMO, except during GMO's Saturday maintenance window, when
+  // bitbank owns them too (see maintenance poller below).
   function applyOrderbook(sym, book) {
-    if (sym === "DOT") return true;
+    if (sym === "DOT" || sym === "AVAX") return true;
     if (maintenanceActive) return true; // bitbank owns this card right now
     if (!book) return false;
     var bestAsk = bestPrice(book.asks, "min");
@@ -1532,6 +1546,54 @@
 
   function stopOkjPolling() {
     if (okjTimer) { clearInterval(okjTimer); okjTimer = null; }
+  }
+
+  // ---- AVAX: bitbank REST is the primary source, OKJ REST is the fallback ----
+  // Simpler than DOT's dual WS/REST setup above: bitbank's normal 1-second REST poll
+  // is already the primary path here (not a fallback standing in for a WebSocket), so
+  // there's no need for a persistent OKJ WebSocket just to cover the fallback role.
+  var AVAX_POLL_MS = 1000;
+  var avaxTimer = null;
+  var avaxInFlight = false;
+
+  function fetchOkjAvaxFallback() {
+    var attempt = tryFetch(OKJ_AVAX_BOOK_URL);
+    PROXY_URLS.forEach(function (buildUrl) {
+      attempt = attempt.catch(function () { return tryFetch(buildUrl(OKJ_AVAX_BOOK_URL)); });
+    });
+    return attempt
+      .then(function (json) {
+        var book = (json && json.data && !Array.isArray(json.data)) ? json.data : json;
+        var bestAsk = bestPrice(book && book.asks, "min");
+        var bestBid = bestPrice(book && book.bids, "max");
+        if (bestAsk === null || bestBid === null) return false;
+        updateCard("AVAX", bestBid, bestAsk);
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
+  function fetchAvaxBoard() {
+    if (avaxInFlight) return;
+    avaxInFlight = true;
+    fetchBitbankBoard("AVAX")
+      .then(function (ok) {
+        if (ok) { setCardSource("AVAX", "", "bitbank（板情報）"); return; }
+        return fetchOkjAvaxFallback().then(function (okjOk) {
+          setCardSource("AVAX", "fallback", okjOk ? "OKコイン（代替）" : "取得エラー（前回値を表示中）");
+        });
+      })
+      .finally(function () { avaxInFlight = false; });
+  }
+
+  function startAvaxPolling() {
+    if (avaxTimer) return;
+    fetchAvaxBoard();
+    avaxTimer = setInterval(fetchAvaxBoard, AVAX_POLL_MS);
+  }
+
+  function stopAvaxPolling() {
+    if (avaxTimer) { clearInterval(avaxTimer); avaxTimer = null; }
   }
 
   // ---- OKJ WebSocket (primary transport for DOT, mirrors the GMO WS fix) ----
@@ -1949,6 +2011,7 @@
     }
     fetchOkjDotBoard();
     if (!okjWsFresh()) reconnectOkjWsNow(); // also retries a socket that's "open" but not actually delivering data
+    fetchAvaxBoard();
   });
 
   if (alertBtn) alertBtn.addEventListener("click", openAlertPanel);
@@ -2042,6 +2105,7 @@
     if (document.hidden) {
       stopRestFallback();
       stopOkjPolling();
+      stopAvaxPolling();
       if (maintenanceTimer) { clearInterval(maintenanceTimer); maintenanceTimer = null; }
     } else {
       checkMaintenanceWindow();
@@ -2058,6 +2122,7 @@
       startOkjPolling();
       // Same "never trust readyState after backgrounding" logic applies to OKJ's WS.
       reconnectOkjWsNow();
+      startAvaxPolling();
       // Prompt heartbeat so GAS learns "the browser is back" quickly rather than
       // waiting up to GAS_HEARTBEAT_INTERVAL_MS for the next scheduled ping.
       sendGasHeartbeat();
@@ -2095,6 +2160,7 @@
   connectWS();
   startOkjPolling();
   connectOkjWs();
+  startAvaxPolling();
 })();
 </script>
 </body>
