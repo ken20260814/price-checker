@@ -846,7 +846,9 @@
   var maintenanceTimer = null;
 
   // Fixed decimal overrides per symbol (skips the generic magnitude-based rule below).
-  var FORCE_DECIMALS = { XRP: 3 };
+  // AVAX's default (bitbank, its primary source) — the OKJ fallback overrides this
+  // to 1 decimal for that one update, see fetchOkjAvaxFallback below.
+  var FORCE_DECIMALS = { XRP: 3, AVAX: 3 };
 
   // Build card skeletons up front. Ask is shown above Bid per the requested layout.
   SYMBOLS.forEach(function (sym) {
@@ -910,7 +912,11 @@
     errorBanner.classList.remove("show");
   }
 
-  function updateCard(sym, bid, ask) {
+  // decimalsOverride lets a caller force a specific decimal count for this one
+  // update, taking priority over FORCE_DECIMALS[sym] — used by AVAX, whose display
+  // precision depends on which exchange the price actually came from this time
+  // (bitbank quotes to 3 decimals, OKJ to 1), not a fixed per-symbol constant.
+  function updateCard(sym, bid, ask, decimalsOverride) {
     var bidEl = document.getElementById("bid-" + sym);
     var askEl = document.getElementById("ask-" + sym);
     var tsEl = document.getElementById("ts-" + sym);
@@ -919,7 +925,7 @@
     bidEl.classList.remove("skel");
     askEl.classList.remove("skel");
 
-    var decimals = FORCE_DECIMALS[sym];
+    var decimals = (typeof decimalsOverride === "number") ? decimalsOverride : FORCE_DECIMALS[sym];
     renderValue(bidEl, bid, decimals);
     renderValue(askEl, ask, decimals);
 
@@ -1474,7 +1480,8 @@
   // optional `guard` is re-checked right before writing to the DOM, so a caller whose
   // situation changed while this request was in flight (e.g. OKJ's WS took over DOT
   // mid-request) can skip stomping fresher data with this now-stale result.
-  function fetchBitbankBoard(sym, guard) {
+  // optional `decimalsOverride` is forwarded straight to updateCard (see AVAX poller).
+  function fetchBitbankBoard(sym, guard, decimalsOverride) {
     var pair = BITBANK_PAIR[sym];
     if (!pair) return Promise.resolve(false);
     var url = BITBANK_URL + "/" + pair + "/depth";
@@ -1489,7 +1496,7 @@
         var bestAsk = bestPrice(book && book.asks, "min");
         var bestBid = bestPrice(book && book.bids, "max");
         if (bestAsk === null || bestBid === null) return false;
-        updateCard(sym, bestBid, bestAsk);
+        updateCard(sym, bestBid, bestAsk, decimalsOverride);
         return true;
       })
       .catch(function () { return false; });
@@ -1556,6 +1563,12 @@
   var avaxTimer = null;
   var avaxInFlight = false;
 
+  // bitbank quotes AVAX-JPY to 3 decimal places, OKJ only to 1 — matching each
+  // exchange's own orderbook precision (rather than a single fixed decimal count
+  // for AVAX regardless of which source actually supplied the number) is what was
+  // requested, so each path passes its own decimals explicitly to updateCard.
+  var AVAX_DECIMALS = { bitbank: 3, okj: 1 };
+
   function fetchOkjAvaxFallback() {
     var attempt = tryFetch(OKJ_AVAX_BOOK_URL);
     PROXY_URLS.forEach(function (buildUrl) {
@@ -1567,7 +1580,7 @@
         var bestAsk = bestPrice(book && book.asks, "min");
         var bestBid = bestPrice(book && book.bids, "max");
         if (bestAsk === null || bestBid === null) return false;
-        updateCard("AVAX", bestBid, bestAsk);
+        updateCard("AVAX", bestBid, bestAsk, AVAX_DECIMALS.okj);
         return true;
       })
       .catch(function () { return false; });
@@ -1576,7 +1589,7 @@
   function fetchAvaxBoard() {
     if (avaxInFlight) return;
     avaxInFlight = true;
-    fetchBitbankBoard("AVAX")
+    fetchBitbankBoard("AVAX", null, AVAX_DECIMALS.bitbank)
       .then(function (ok) {
         if (ok) { setCardSource("AVAX", "", "bitbank（板情報）"); return; }
         return fetchOkjAvaxFallback().then(function (okjOk) {
