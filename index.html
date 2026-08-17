@@ -184,6 +184,11 @@
     line-height: 1;
   }
   .alert-panel-close:active { background: var(--surface-2); }
+  .alert-panel-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+  }
   .alert-perm {
     display: flex;
     align-items: center;
@@ -573,6 +578,7 @@
         <h2>通知の全体設定</h2>
         <button class="alert-panel-close" id="alertPanelClose" aria-label="閉じる">×</button>
       </div>
+      <div class="alert-panel-scroll">
       <div class="alert-perm">
         <span class="alert-perm-text" id="alertPermText">通知の許可状況を確認しています…</span>
         <button class="alert-perm-btn" id="alertPermBtn">通知を許可</button>
@@ -638,6 +644,7 @@
             <span class="switch-track"></span>
           </label>
         </div>
+      </div>
       </div>
       <div class="alert-panel-note">
         各通貨の価格しきい値は、それぞれのカード右上のベルアイコンから設定できます。ここでは通知の許可設定・Telegram連携・GAS連携のみ行います。<br>
