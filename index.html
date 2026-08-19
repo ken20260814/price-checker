@@ -579,6 +579,16 @@
         <button class="alert-panel-close" id="alertPanelClose" aria-label="閉じる">×</button>
       </div>
       <div class="alert-panel-scroll">
+      <div class="alert-telegram">
+        <div class="alert-telegram-head">全通貨の通知リセット</div>
+        <div class="alert-telegram-hint">
+          全ての通貨のアラートしきい値（上限・下限）を一括で解除します。個々の通貨のベルアイコンから設定し直したい場合などにお使いください。
+        </div>
+        <div class="alert-telegram-actions">
+          <button class="alert-perm-btn" id="resetAllAlertsBtn">全通貨の通知をリセット</button>
+          <span class="alert-telegram-status" id="resetAllAlertsStatus"></span>
+        </div>
+      </div>
       <div class="alert-perm">
         <span class="alert-perm-text" id="alertPermText">通知の許可状況を確認しています…</span>
         <button class="alert-perm-btn" id="alertPermBtn">通知を許可</button>
@@ -643,16 +653,6 @@
             <input type="checkbox" id="gasHeartbeatEnabledSwitch" checked>
             <span class="switch-track"></span>
           </label>
-        </div>
-      </div>
-      <div class="alert-telegram">
-        <div class="alert-telegram-head">全通貨の通知リセット</div>
-        <div class="alert-telegram-hint">
-          全ての通貨のアラートしきい値（上限・下限）を一括で解除します。個々の通貨のベルアイコンから設定し直したい場合などにお使いください。
-        </div>
-        <div class="alert-telegram-actions">
-          <button class="alert-perm-btn" id="resetAllAlertsBtn">全通貨の通知をリセット</button>
-          <span class="alert-telegram-status" id="resetAllAlertsStatus"></span>
         </div>
       </div>
       </div>
@@ -2151,7 +2151,6 @@
     saveGasSyncSettings();
   });
   if (resetAllAlertsBtn) resetAllAlertsBtn.addEventListener("click", function () {
-    if (!window.confirm("全ての通貨のアラート設定（上限・下限）をリセットします。よろしいですか？")) return;
     resetAllAlerts();
     if (resetAllAlertsStatus) {
       resetAllAlertsStatus.textContent = "全通貨の通知をリセットしました";
