@@ -645,6 +645,16 @@
           </label>
         </div>
       </div>
+      <div class="alert-telegram">
+        <div class="alert-telegram-head">全通貨の通知リセット</div>
+        <div class="alert-telegram-hint">
+          全ての通貨のアラートしきい値（上限・下限）を一括で解除します。個々の通貨のベルアイコンから設定し直したい場合などにお使いください。
+        </div>
+        <div class="alert-telegram-actions">
+          <button class="alert-perm-btn" id="resetAllAlertsBtn">全通貨の通知をリセット</button>
+          <span class="alert-telegram-status" id="resetAllAlertsStatus"></span>
+        </div>
+      </div>
       </div>
       <div class="alert-panel-note">
         各通貨の価格しきい値は、それぞれのカード右上のベルアイコンから設定できます。ここでは通知の許可設定・Telegram連携・GAS連携のみ行います。<br>
@@ -769,7 +779,7 @@
   // Per-symbol +/- step size for the alert dialog, and how many decimal places
   // that step needs (derived from the step's own precision) so repeated
   // stepping never accumulates floating-point noise like 0.30000000000000004.
-  var ALERT_STEP = { BTC: 1000, ETH: 100, XRP: 0.1, BCH: 50, LTC: 5, SOL: 5, LINK: 1, SUI: 0.1, DOT: 0.1, AVAX: 5 };
+  var ALERT_STEP = { BTC: 2000, ETH: 100, XRP: 0.1, BCH: 50, LTC: 5, SOL: 5, LINK: 1, SUI: 0.1, DOT: 0.1, AVAX: 5 };
   var ALERT_STEP_DECIMALS = {};
   Object.keys(ALERT_STEP).forEach(function (sym) {
     var s = String(ALERT_STEP[sym]);
@@ -787,6 +797,8 @@
   var gasSyncStatusEl = document.getElementById("gasSyncStatus");
   var gasEnabledSwitchEl = document.getElementById("gasEnabledSwitch");
   var gasHeartbeatEnabledSwitchEl = document.getElementById("gasHeartbeatEnabledSwitch");
+  var resetAllAlertsBtn = document.getElementById("resetAllAlertsBtn");
+  var resetAllAlertsStatus = document.getElementById("resetAllAlertsStatus");
 
   var INTERVAL_SEC = 1;  // REST fallback polling cadence (fixed per user request)
   var restTimer = null;
@@ -1396,6 +1408,24 @@
     var input = field === "upper" ? alertUpperInput : alertLowerInput;
     if (input) input.value = "";
     alertInputChanged(sym, field, "");
+  }
+
+  // Common-settings "reset all" — clears upper/lower thresholds for every
+  // currency at once, re-arms each symbol's crossing-detection seed so a
+  // stale tripped state doesn't linger, and re-syncs the (now-empty) config
+  // to GAS so the server-side checker stops firing for them too.
+  function resetAllAlerts() {
+    SYMBOLS.forEach(function (sym) {
+      alertSettings[sym] = { upper: null, lower: null };
+      alertState[sym] = { seeded: false, aboveUpper: false, belowLower: false };
+      updateCardAlertBadge(sym);
+    });
+    saveAlertSettings();
+    syncAlertSettingsToGas();
+    if (currentAlertSym) {
+      if (alertUpperInput) alertUpperInput.value = "";
+      if (alertLowerInput) alertLowerInput.value = "";
+    }
   }
 
   // Best price = min ask / max bid across whatever levels the API returns —
@@ -2119,6 +2149,15 @@
   if (gasHeartbeatEnabledSwitchEl) gasHeartbeatEnabledSwitchEl.addEventListener("change", function () {
     gasSyncSettings.heartbeatEnabled = gasHeartbeatEnabledSwitchEl.checked;
     saveGasSyncSettings();
+  });
+  if (resetAllAlertsBtn) resetAllAlertsBtn.addEventListener("click", function () {
+    if (!window.confirm("全ての通貨のアラート設定（上限・下限）をリセットします。よろしいですか？")) return;
+    resetAllAlerts();
+    if (resetAllAlertsStatus) {
+      resetAllAlertsStatus.textContent = "全通貨の通知をリセットしました";
+      resetAllAlertsStatus.className = "alert-telegram-status ok";
+    }
+    showToast("全通貨の通知をリセットしました");
   });
 
   document.addEventListener("visibilitychange", function () {
