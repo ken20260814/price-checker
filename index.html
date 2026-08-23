@@ -698,7 +698,7 @@
   <div class="alert-toast-wrap" id="alertToastWrap"></div>
 
   <footer>
-    データ提供元: 通常はGMOコイン 公開API（api.coin.z.com）板情報チャンネル。DOTはOKJの板情報を優先取得（不可時はbitbank）。AVAXはbitbankを優先取得（不可時はOKJ）。GMOメンテナンス中（毎週土曜9:00〜11:10）は全銘柄bitbankに切替。<br>
+    データ提供元: 通常はGMOコイン 公開API（api.coin.z.com）板情報チャンネル。DOTはOKJの板情報を優先取得（不可時はbitbank）。AVAXはbitbankを優先取得（不可時はOKJ）。GMOメンテナンス中（毎週土曜9:00〜11:10）は全銘柄OKJに切替（OKJが取得できない銘柄のみbitbankで代替）。<br>
     買値・売値は板情報の最良気配（最良買い注文・最良売り注文）です。約定ベースではないため、流動性の低い銘柄でも気配の動きをリアルタイムに反映します。<br>
     表示価格は参考値です。実際の取引価格は必ずGMOコインアプリ・サイトでご確認ください。<br>
     <span id="lastFetchLine">未取得</span>
@@ -739,7 +739,9 @@
 
   // bitbank: used (a) as DOT's fallback whenever OKJ is unreachable, (b) as AVAX's
   // primary source (OKJ is AVAX's fallback — see the AVAX poller below), and
-  // (c) for every symbol during GMO's announced Saturday maintenance window.
+  // (c) as the per-symbol safety net during GMO's announced Saturday maintenance
+  // window, for whichever symbol OKJ (the maintenance window's primary source —
+  // see the maintenance poller below) couldn't serve.
   var BITBANK_URL = "https://public.bitbank.cc";
   var BITBANK_PAIR = {
     BTC: "btc_jpy", ETH: "eth_jpy", XRP: "xrp_jpy",
@@ -976,6 +978,20 @@
                             // rather than waiting for the next tick (which would
                             // otherwise swallow a crossing that happens on that tick).
 
+  // Grace window right after returning from background (phone unlocked / app
+  // switched back to). The very first price sample(s) after resume can come from
+  // a public CORS proxy fallback (allorigins.win / corsproxy.io — see PROXY_URLS)
+  // if the direct GMO/bitbank fetch times out while mobile connectivity is still
+  // waking up. Those proxies cache responses server-side and can hand back a
+  // stale snapshot that's noticeably off from the live price, which used to get
+  // funneled straight into checkPriceAlert() and fire a false Telegram alert.
+  // While this window is active, every tick just re-seeds the baseline instead of
+  // comparing/firing, so a crossing only fires once a couple of consistent ticks
+  // have confirmed the real price — a stale one-off reading gets absorbed instead
+  // of triggering a notification.
+  var RESUME_GUARD_MS = 5000;
+  var resumeGuardUntil = 0;
+
   function loadAlertSettings() {
     try {
       var raw = window.localStorage.getItem(ALERT_STORAGE_KEY);
@@ -1036,6 +1052,17 @@
 
     var isAboveUpper = setting.upper != null && mid >= setting.upper;
     var isBelowLower = setting.lower != null && mid <= setting.lower;
+
+    if (Date.now() < resumeGuardUntil) {
+      // Still inside the post-resume grace window — treat this tick as a fresh
+      // baseline rather than a possible crossing (see resumeGuardUntil comment
+      // above). Once genuinely-live data settles in, the window lapses and normal
+      // crossing detection resumes from whatever the baseline ends up being.
+      state.seeded = true;
+      state.aboveUpper = isAboveUpper;
+      state.belowLower = isBelowLower;
+      return;
+    }
 
     if (!state.seeded) {
       // First observation after (re)load or after this alert was just configured —
@@ -1454,10 +1481,10 @@
   // DOT is handled entirely by its own OKJ→bitbank poller (see below), and AVAX by
   // its own bitbank→OKJ poller — neither ever comes from GMO. Every other symbol
   // normally comes from GMO, except during GMO's Saturday maintenance window, when
-  // bitbank owns them too (see maintenance poller below).
+  // the maintenance poller's OKJ→bitbank pair owns them too (see below).
   function applyOrderbook(sym, book) {
     if (sym === "DOT" || sym === "AVAX") return true;
-    if (maintenanceActive) return true; // bitbank owns this card right now
+    if (maintenanceActive) return true; // maintenance poller owns this card right now
     if (!book) return false;
     var bestAsk = bestPrice(book.asks, "min");
     var bestBid = bestPrice(book.bids, "max");
@@ -1542,7 +1569,7 @@
   // True while OKJ's WebSocket is open and has delivered data recently — while true,
   // the REST/bitbank poller below stands down so it can't overwrite fresher WS data
   // with a slower, in-flight REST result (the same race the maintenance poller guards
-  // against — see pollMaintenanceBitbank below).
+  // against — see pollMaintenanceOkj below).
   function okjWsFresh() {
     return isOkjWsOpen() && lastOkjWsActivityAt && (Date.now() - lastOkjWsActivityAt) < 3000;
   }
@@ -1829,20 +1856,57 @@
     return mins >= (9 * 60) && mins < (11 * 60 + 10); // 09:00–11:10 JST
   }
 
-  function pollMaintenanceBitbank() {
+  // Generic OKJ order-book fetch, used only by the maintenance-window poller below
+  // (DOT and AVAX above have their own dedicated OKJ URLs/pollers and are untouched
+  // by this). NOTE: same caveat as the DOT/AVAX OKJ URLs above — OKJ's exact symbol
+  // lineup on the order-book (取引所) side, as opposed to the dealer-only (販売所)
+  // side, could not be independently verified from this environment. If OKJ has no
+  // book for a given symbol (or the request fails), the maintenance poller below
+  // automatically falls back to bitbank for that symbol only, so a symbol OKJ
+  // doesn't cover still shows a price instead of going blank.
+  var MAINTENANCE_OKJ_BOOK_URL_BASE = "https://www.okcoin.jp/api/spot/v3/instruments/";
+
+  function fetchOkjBoardFor(sym) {
+    var url = MAINTENANCE_OKJ_BOOK_URL_BASE + sym + "-JPY/book";
+    var attempt = tryFetch(url);
+    PROXY_URLS.forEach(function (buildUrl) {
+      attempt = attempt.catch(function () { return tryFetch(buildUrl(url)); });
+    });
+    return attempt
+      .then(function (json) {
+        var book = (json && json.data && !Array.isArray(json.data)) ? json.data : json;
+        var bestAsk = bestPrice(book && book.asks, "min");
+        var bestBid = bestPrice(book && book.bids, "max");
+        if (bestAsk === null || bestBid === null) return false;
+        updateCard(sym, bestBid, bestAsk);
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
+  function pollMaintenanceOkj() {
     MAINTENANCE_SYMBOLS.forEach(function (sym, i) {
       delay(i * 150)
         .then(function () {
           // Re-check on both sides of the request: the maintenance window may have
           // ended while this particular symbol's staggered fetch was in flight, and
           // without this guard a late response can overwrite a card the moment
-          // GMO comes back — stomping fresh GMO data with a stale bitbank price/label.
-          if (!maintenanceActive) return false;
-          return fetchBitbankBoard(sym);
+          // GMO comes back — stomping fresh GMO data with a stale price/label.
+          if (!maintenanceActive) return null;
+          return fetchOkjBoardFor(sym);
         })
-        .then(function (ok) {
-          if (!maintenanceActive) return;
-          setCardSource(sym, "fallback", ok ? "bitbank（GMOメンテナンス中）" : "取得エラー");
+        .then(function (okOkj) {
+          if (okOkj === null || !maintenanceActive) return;
+          if (okOkj) {
+            setCardSource(sym, "fallback", "OKJ（GMOメンテナンス中）");
+            return;
+          }
+          // OKJ didn't have this symbol's book (or the request failed) — fall back
+          // to bitbank for just this symbol, mirroring the DOT OKJ→bitbank pattern.
+          return fetchBitbankBoard(sym, function () { return maintenanceActive; }).then(function (okBitbank) {
+            if (!maintenanceActive) return;
+            setCardSource(sym, "fallback", okBitbank ? "bitbank（代替・GMOメンテナンス中）" : "取得エラー");
+          });
         });
     });
   }
@@ -1851,10 +1915,10 @@
     if (maintenanceActive) return;
     maintenanceActive = true;
     hideError();
-    setStatus("warn", "GMOコインはメンテナンス中です（bitbankで代替表示・毎週土曜9:00〜11:10）");
-    pollMaintenanceBitbank();
+    setStatus("warn", "GMOコインはメンテナンス中です（OKJで代替表示・毎週土曜9:00〜11:10）");
+    pollMaintenanceOkj();
     if (maintenanceTimer) clearInterval(maintenanceTimer);
-    maintenanceTimer = setInterval(pollMaintenanceBitbank, INTERVAL_SEC * 1000);
+    maintenanceTimer = setInterval(pollMaintenanceOkj, INTERVAL_SEC * 1000);
   }
 
   function exitMaintenanceMode() {
@@ -2054,7 +2118,7 @@
   refreshBtn.addEventListener("click", function () {
     checkMaintenanceWindow();
     if (maintenanceActive) {
-      pollMaintenanceBitbank();
+      pollMaintenanceOkj();
     } else {
       fetchTicker();
       if (!isWsOpen()) reconnectNow();
@@ -2166,10 +2230,14 @@
       stopAvaxPolling();
       if (maintenanceTimer) { clearInterval(maintenanceTimer); maintenanceTimer = null; }
     } else {
+      // Re-arm the post-resume grace window (see resumeGuardUntil above) so the
+      // burst of reconnects/fetches below can't feed a stale proxy reading
+      // straight into an alert firing.
+      resumeGuardUntil = Date.now() + RESUME_GUARD_MS;
       checkMaintenanceWindow();
       if (maintenanceActive) {
-        pollMaintenanceBitbank();
-        if (!maintenanceTimer) maintenanceTimer = setInterval(pollMaintenanceBitbank, INTERVAL_SEC * 1000);
+        pollMaintenanceOkj();
+        if (!maintenanceTimer) maintenanceTimer = setInterval(pollMaintenanceOkj, INTERVAL_SEC * 1000);
       } else {
         // Phones frequently freeze/kill the socket while backgrounded without firing
         // a close event, so always force a clean reconnect on return rather than
