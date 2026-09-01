@@ -788,6 +788,15 @@
     var i = s.indexOf(".");
     ALERT_STEP_DECIMALS[sym] = i === -1 ? 0 : (s.length - i - 1);
   });
+
+  // Per-symbol offset applied when seeding the alert dialog's textboxes from
+  // the current best ask/bid — used (a) the first time a symbol's alert
+  // dialog is opened with no saved threshold yet, and (b) when the +/- button
+  // is pressed right after リセット has cleared the box back to blank. In
+  // both cases the box starts from ask+offset (upper/売値) or bid-offset
+  // (lower/買値) instead of the raw ask/bid, so the default suggestion already
+  // has some headroom instead of sitting exactly at the current price.
+  var ALERT_INITIAL_OFFSET = { BTC: 10000, ETH: 500, XRP: 0.3, BCH: 150, LTC: 20, LINK: 10, DOT: 0.5, SOL: 50, SUI: 0.2, AVAX: 5 };
   var telegramBotTokenEl = document.getElementById("telegramBotToken");
   var telegramChatIdEl = document.getElementById("telegramChatId");
   var telegramTestBtn = document.getElementById("telegramTestBtn");
@@ -1379,12 +1388,13 @@
     // +/- or clear it with リセット. An already-saved value is left untouched.
     var setting = getAlertSetting(sym);
     var known = lastKnownPrice[sym];
+    var initOffset = ALERT_INITIAL_OFFSET[sym] || 0;
     if (setting.upper == null && known) {
-      alertInputChanged(sym, "upper", roundStepValue(known.ask, sym));
+      alertInputChanged(sym, "upper", roundStepValue(known.ask + initOffset, sym));
       setting = getAlertSetting(sym);
     }
     if (setting.lower == null && known) {
-      alertInputChanged(sym, "lower", roundStepValue(known.bid, sym));
+      alertInputChanged(sym, "lower", roundStepValue(known.bid - initOffset, sym));
       setting = getAlertSetting(sym);
     }
 
@@ -1420,7 +1430,8 @@
     }
     if (base == null) {
       var known = lastKnownPrice[sym];
-      base = known ? (field === "upper" ? known.ask : known.bid) : 0;
+      var initOffset = ALERT_INITIAL_OFFSET[sym] || 0;
+      base = known ? (field === "upper" ? known.ask + initOffset : known.bid - initOffset) : 0;
     }
 
     var next = roundStepValue(base + step * dir, sym);
