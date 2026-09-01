@@ -1109,7 +1109,8 @@
       } catch (e) { /* some browsers restrict constructing Notification directly; toast still shown */ }
     }
 
-    sendTelegramMessage("価格アラート\n" + message);
+    var telegramMessage = sym + "が" + thresholdText + " を" + dir + "（現在 " + currentText + "）";
+    sendTelegramMessage(telegramMessage);
   }
 
   // ---- Telegram notification integration ----
