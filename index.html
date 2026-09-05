@@ -344,6 +344,62 @@
     flex-shrink: 0;
   }
 
+  /* BTC price-copy panel: current best ask/bid, plus a table of rounded
+     candidate prices (5,000-yen steps, offset at least 18,000 yen from the
+     current best ask/bid) that can be tapped to copy straight to clipboard. */
+  .price-copy-body { overflow-y: auto; padding: 4px 16px 4px; }
+  .price-copy-current {
+    background: var(--surface-2);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 10px 0 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .price-copy-current-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .price-copy-current-label { font-size: 11.5px; color: var(--text-muted); }
+  .price-copy-current-value {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .price-copy-table-head {
+    display: flex;
+    gap: 8px;
+    padding: 0 2px;
+    margin-bottom: 6px;
+  }
+  .price-copy-table-head span {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .price-copy-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .price-copy-cell {
+    flex: 1;
+    min-width: 0;
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-1);
+    font-size: 14.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    padding: 12px 6px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  .price-copy-cell:active { transform: scale(0.95); background: var(--surface); }
+
   /* One-shot highlight when a threshold alert fires (distinct from the removed
      per-update flash — this only happens on a rare, real crossing event). */
   @keyframes alertRing {
@@ -695,6 +751,35 @@
     </div>
   </div>
 
+  <div class="alert-overlay" id="priceCopyOverlay">
+    <div class="alert-panel">
+      <div class="alert-panel-head">
+        <h2>BTC価格コピー</h2>
+        <button class="alert-panel-close" id="priceCopyClose" aria-label="閉じる">×</button>
+      </div>
+      <div class="price-copy-body" id="priceCopyBody">
+        <div class="price-copy-current">
+          <div class="price-copy-current-row">
+            <span class="price-copy-current-label">btc最良売り気配</span>
+            <span class="price-copy-current-value" id="priceCopyBestAsk">--</span>
+          </div>
+          <div class="price-copy-current-row">
+            <span class="price-copy-current-label">btc最良買い気配</span>
+            <span class="price-copy-current-value" id="priceCopyBestBid">--</span>
+          </div>
+        </div>
+        <div class="price-copy-table-head">
+          <span>売値</span>
+          <span>買値</span>
+        </div>
+        <div class="price-copy-table" id="priceCopyTable"></div>
+      </div>
+      <div class="alert-panel-note">
+        最良売り・買い気配より±18,000円以上離れた位置から、5,000円刻みで見やすい価格に切り上げ／切り下げて候補を表示します（価格が動くとリアルタイムに更新されます）。数字をタップするとその価格をコピーできます。
+      </div>
+    </div>
+  </div>
+
   <div class="alert-toast-wrap" id="alertToastWrap"></div>
 
   <footer>
@@ -777,6 +862,20 @@
   var alertLowerPlus = document.getElementById("alertLowerPlus");
   var alertLowerReset = document.getElementById("alertLowerReset");
   var currentAlertSym = null;
+
+  // BTC-only "price copy" panel: lets the user tap a rounded candidate price
+  // (5,000-yen steps, offset from the current best ask/bid) to copy it to the
+  // clipboard instead of retyping it into the exchange's order form.
+  var priceCopyOverlay = document.getElementById("priceCopyOverlay");
+  var priceCopyClose = document.getElementById("priceCopyClose");
+  var priceCopyBestAsk = document.getElementById("priceCopyBestAsk");
+  var priceCopyBestBid = document.getElementById("priceCopyBestBid");
+  var priceCopyTable = document.getElementById("priceCopyTable");
+  var priceCopySym = "BTC";
+  var priceCopyOpen = false;
+  var PRICE_COPY_MIN_OFFSET = 18000; // candidate must sit at least this far from the best ask/bid
+  var PRICE_COPY_STEP = 5000;        // candidates are rounded to this step for readability
+  var PRICE_COPY_ROWS = 5;
 
   // Per-symbol +/- step size for the alert dialog, and how many decimal places
   // that step needs (derived from the step's own precision) so repeated
@@ -881,6 +980,21 @@
   var FORCE_DECIMALS = { XRP: 3, AVAX: 3 };
 
   // Build card skeletons up front. Ask is shown above Bid per the requested layout.
+  // Only BTC gets the price-copy shortcut for now (see priceCopySym above);
+  // built as a template string here so adding it for another symbol later is
+  // just a matter of widening this condition.
+  function priceCopyBtnHtml(sym) {
+    if (sym !== priceCopySym) return "";
+    return (
+      '<button class="card-alert-btn card-copy-btn" id="priceCopyBtn-' + sym + '" title="' + sym + '価格コピー" aria-label="' + sym + '価格コピー">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<rect x="9" y="9" width="11" height="11" rx="2"></rect>' +
+          '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>' +
+        '</svg>' +
+      '</button>'
+    );
+  }
+
   SYMBOLS.forEach(function (sym) {
     var card = document.createElement("div");
     card.className = "card";
@@ -896,6 +1010,7 @@
             '</svg>' +
             '<span class="card-alert-badge" id="alertBadge-' + sym + '"></span>' +
           '</button>' +
+          priceCopyBtnHtml(sym) +
           '<div class="updated-at" id="ts-' + sym + '">--:--:--</div>' +
         '</div>' +
       '</div>' +
@@ -962,6 +1077,8 @@
     tsEl.textContent = nowJST();
 
     checkPriceAlert(sym, bid, ask); // every price source funnels through here
+
+    if (sym === priceCopySym && priceCopyOpen) renderPriceCopyPanel();
   }
 
   function renderValue(el, curRaw, forceDecimals) {
@@ -1415,6 +1532,80 @@
   function closeSymbolAlertPanel() {
     if (symbolAlertOverlay) symbolAlertOverlay.classList.remove("show");
     currentAlertSym = null;
+  }
+
+  // ---- BTC price-copy panel ----
+  function openPriceCopyPanel() {
+    priceCopyOpen = true;
+    renderPriceCopyPanel();
+    if (priceCopyOverlay) priceCopyOverlay.classList.add("show");
+  }
+
+  function closePriceCopyPanel() {
+    priceCopyOpen = false;
+    if (priceCopyOverlay) priceCopyOverlay.classList.remove("show");
+  }
+
+  function formatPriceCopyYen(v) {
+    return Math.round(v).toLocaleString("ja-JP") + "円";
+  }
+
+  // Builds the candidate table: sell (売値) candidates start at the best ask
+  // rounded UP to the next 5,000-yen step that's still at least
+  // PRICE_COPY_MIN_OFFSET above it, then climb by another step per row; buy
+  // (買値) candidates mirror this rounded DOWN from the best bid.
+  function renderPriceCopyPanel() {
+    var known = lastKnownPrice[priceCopySym];
+    if (!known || !priceCopyTable) return;
+
+    var bestAsk = known.ask, bestBid = known.bid;
+    if (priceCopyBestAsk) priceCopyBestAsk.textContent = formatPriceCopyYen(bestAsk);
+    if (priceCopyBestBid) priceCopyBestBid.textContent = formatPriceCopyYen(bestBid);
+
+    var sellStart = Math.ceil((bestAsk + PRICE_COPY_MIN_OFFSET) / PRICE_COPY_STEP) * PRICE_COPY_STEP;
+    var buyStart = Math.floor((bestBid - PRICE_COPY_MIN_OFFSET) / PRICE_COPY_STEP) * PRICE_COPY_STEP;
+
+    var rowsHtml = "";
+    for (var i = 0; i < PRICE_COPY_ROWS; i++) {
+      var sellVal = sellStart + i * PRICE_COPY_STEP;
+      var buyVal = buyStart - i * PRICE_COPY_STEP;
+      rowsHtml +=
+        '<div class="price-copy-row">' +
+          '<button type="button" class="price-copy-cell" data-copy-value="' + sellVal + '">' + sellVal.toLocaleString("ja-JP") + '</button>' +
+          '<button type="button" class="price-copy-cell" data-copy-value="' + buyVal + '">' + buyVal.toLocaleString("ja-JP") + '</button>' +
+        '</div>';
+    }
+    priceCopyTable.innerHTML = rowsHtml;
+  }
+
+  // Copies the raw digits only (no comma, no 円) since this is meant to be
+  // pasted straight into an exchange's price input field.
+  function copyPriceCopyValue(rawValue) {
+    copyTextToClipboard(rawValue);
+    showToast(Number(rawValue).toLocaleString("ja-JP") + "円をコピーしました");
+  }
+
+  function copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () { legacyCopyToClipboard(text); });
+    } else {
+      legacyCopyToClipboard(text);
+    }
+  }
+
+  // Fallback for browsers/webviews without the async Clipboard API.
+  function legacyCopyToClipboard(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch (e) { /* clipboard unavailable; user can still read the number off the screen */ }
   }
 
   function stepAlertInput(field, dir) {
@@ -2154,6 +2345,21 @@
   if (symbolAlertClose) symbolAlertClose.addEventListener("click", closeSymbolAlertPanel);
   if (symbolAlertOverlay) symbolAlertOverlay.addEventListener("click", function (ev) {
     if (ev.target === symbolAlertOverlay) closeSymbolAlertPanel();
+  });
+
+  (function () {
+    var btn = document.getElementById("priceCopyBtn-" + priceCopySym);
+    if (btn) btn.addEventListener("click", openPriceCopyPanel);
+  })();
+  if (priceCopyClose) priceCopyClose.addEventListener("click", closePriceCopyPanel);
+  if (priceCopyOverlay) priceCopyOverlay.addEventListener("click", function (ev) {
+    if (ev.target === priceCopyOverlay) closePriceCopyPanel();
+  });
+  if (priceCopyTable) priceCopyTable.addEventListener("click", function (ev) {
+    var cell = ev.target.closest ? ev.target.closest(".price-copy-cell") : null;
+    if (!cell) return;
+    var raw = cell.getAttribute("data-copy-value");
+    if (raw != null) copyPriceCopyValue(raw);
   });
   if (alertUpperInput) alertUpperInput.addEventListener("change", function () {
     if (currentAlertSym) alertInputChanged(currentAlertSym, "upper", alertUpperInput.value);
